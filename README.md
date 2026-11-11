@@ -45,6 +45,7 @@ Click 🎞 in the menu bar:
 macOS has no public API for a custom lock screen video, and the lock screen shows the system wallpaper. LiveWall therefore registers your video as a custom "aerial" in the wallpaper manifest and points the system wallpaper at it. Your desktop video window sits on top, so the desktop and lock screen can differ.
 
 - Files touched: `~/Library/Application Support/com.apple.wallpaper/aerials/{videos,thumbnails,manifest/entries.json}` and `.../Store/Index.plist`
+- Some macOS versions store a separate `Desktop` and `Idle` (lock screen / screen saver) config instead of one `Linked` config. LiveWall writes to all of them, but that layout is untested, so please open an issue if the lock screen doesn't change
 - Clips shorter than 30 s are repeated into a longer file first, because the lock screen player freezes at the loop point of very short clips
 - To undo, pick any wallpaper in System Settings ▸ Wallpaper
 - This relies on undocumented macOS internals. It was developed and tested on macOS 27.2 (Apple Silicon); other versions may not work. If it fails, LiveWall shows an error. Back up `Index.plist` and `entries.json` from that folder first if you want to be safe.

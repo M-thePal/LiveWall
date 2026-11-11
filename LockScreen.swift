@@ -51,6 +51,35 @@ enum LockScreen {
         let videoDst = aerials.appendingPathComponent("videos/\(id).mov")
         let thumbDst = aerials.appendingPathComponent("thumbnails/\(id).png")
 
+        // 0. read and validate everything first, so an unsupported layout fails before any file is touched
+        guard let data = try? Data(contentsOf: manifest),
+              var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              var assets = root["assets"] as? [[String: Any]],
+              var cats = root["categories"] as? [[String: Any]] else { throw Failure(description: "can't read \(manifest.path)") }
+        var fmt = PropertyListSerialization.PropertyListFormat.binary
+        guard var plist = try PropertyListSerialization.propertyList(from: Data(contentsOf: index), options: [], format: &fmt) as? [String: Any]
+        else { throw Failure(description: "can't read \(index.path)") }
+        let config = try PropertyListSerialization.data(fromPropertyList: ["assetID": id], format: .binary, options: 0)
+        var changed = 0
+        for key in ["AllSpacesAndDisplays", "SystemDefault"] {
+            guard var scope = plist[key] as? [String: Any] else { continue }
+            // "Linked": one config for desktop and lock screen. Otherwise macOS keeps a "Desktop" and an "Idle"
+            // (lock screen / screen saver) config; we set all that exist, since the desktop is covered by LiveWall anyway.
+            // shortcut: the Desktop/Idle layout is untested on real hardware, confirm on a Mac that has it.
+            var touched = false
+            for slot in ["Linked", "Desktop", "Idle"] {
+                guard var s = scope[slot] as? [String: Any], var content = s["Content"] as? [String: Any] else { continue }
+                content["Choices"] = [["Configuration": config, "Files": [Any](), "Provider": "com.apple.wallpaper.choice.aerials"]]
+                s["Content"] = content; s["LastSet"] = Date(); s["LastUse"] = Date()
+                scope[slot] = s; touched = true
+            }
+            if touched { plist[key] = scope; changed += 1 }
+        }
+        guard changed > 0 else {
+            let keys = (plist["AllSpacesAndDisplays"] as? [String: Any])?.keys.sorted() ?? []
+            throw Failure(description: "unsupported wallpaper layout (AllSpacesAndDisplays keys: \(keys)). Please report this on GitHub.")
+        }
+
         // 1. files
         try fm.createDirectory(at: videoDst.deletingLastPathComponent(), withIntermediateDirectories: true)
         try fm.createDirectory(at: thumbDst.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -62,10 +91,6 @@ enum LockScreen {
         try png?.write(to: thumbDst)
 
         // 2. manifest: drop our old entries (and their files), add the new one
-        guard let data = try? Data(contentsOf: manifest),
-              var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              var assets = root["assets"] as? [[String: Any]],
-              var cats = root["categories"] as? [[String: Any]] else { throw Failure(description: "can't read \(manifest.path)") }
         for old in assets.compactMap({ $0["id"] as? String }) where old.hasPrefix(prefix) {
             try? fm.removeItem(at: aerials.appendingPathComponent("videos/\(old).mov"))
             try? fm.removeItem(at: aerials.appendingPathComponent("thumbnails/\(old).png"))
@@ -89,20 +114,7 @@ enum LockScreen {
         root["assets"] = assets; root["categories"] = cats; root["initialAssetCount"] = assets.count
         try JSONSerialization.data(withJSONObject: root).write(to: manifest, options: .atomic)
 
-        // 3. point the system wallpaper (desktop + lock screen, "linked") at it
-        var fmt = PropertyListSerialization.PropertyListFormat.binary
-        guard var plist = try PropertyListSerialization.propertyList(from: Data(contentsOf: index), options: [], format: &fmt) as? [String: Any]
-        else { throw Failure(description: "can't read \(index.path)") }
-        let config = try PropertyListSerialization.data(fromPropertyList: ["assetID": id], format: .binary, options: 0)
-        var changed = 0
-        for key in ["AllSpacesAndDisplays", "SystemDefault"] {
-            guard var scope = plist[key] as? [String: Any], var linked = scope["Linked"] as? [String: Any],
-                  var content = linked["Content"] as? [String: Any] else { continue }
-            content["Choices"] = [["Configuration": config, "Files": [Any](), "Provider": "com.apple.wallpaper.choice.aerials"]]
-            linked["Content"] = content; linked["LastSet"] = Date(); linked["LastUse"] = Date()
-            scope["Linked"] = linked; plist[key] = scope; changed += 1
-        }
-        guard changed > 0 else { throw Failure(description: "wallpaper isn't in 'linked' mode (System Settings ▸ Wallpaper)") }
+        // 3. point the system wallpaper at it
         try PropertyListSerialization.data(fromPropertyList: plist, format: fmt, options: 0).write(to: index, options: .atomic)
 
         // 4. the agent re-reads its config on restart; launchd brings it back by itself
