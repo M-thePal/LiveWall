@@ -1,0 +1,7 @@
+.DS_Store
+LiveWall.app/
+# local backups of macOS wallpaper config, and the video library
+.backup/
+/Videos
+*.mp4
+*.mov
